@@ -164,10 +164,8 @@ def train(args):
                 #   2. trainer.rollouts is a storage containing all data
                 #   3. Pass current observations to compute_action
                 #   4. Since we are using stacked environments, please pay attention to the shape of each type of data
-                values = None
-                actions = None
-                action_log_prob = None
-                pass
+                with torch.no_grad():
+                    values, actions, action_log_prob = trainer.compute_action(obs)
 
                 # actions is a torch tensor, so we need to turn it into numpy array.
                 cpu_actions = actions.cpu().numpy()
@@ -185,7 +183,7 @@ def train(args):
 
                 rewards = torch.from_numpy(
                     reward.astype(np.float32)).view(-1, 1).to(config.device)
-
+                # print(config.num_steps, iteration, index, total_steps)
                 # Store samples
                 trainer.rollouts.insert(to_tensor(obs), actions, action_log_prob, values, rewards, masks)
 

@@ -16,6 +16,7 @@ import gym
 import numpy as np
 import torch
 import torch.nn as nn
+import math
 from torch.distributions import Categorical
 
 current_dir = osp.join(osp.abspath(osp.dirname(__file__)))
@@ -105,10 +106,14 @@ class BaseTrainer:
             means, log_std, values = self.model(obs)
             pass
             if deterministic:  # Use the means as the action
-                actions = None
+                actions = means
             else:
-                actions = None
-            action_log_probs = None
+                actions = torch.normal(means, torch.exp(log_std))
+
+            action_std = torch.exp(log_std)
+            dist = torch.distributions.Normal(means, action_std)
+            action_log_probs_raw = dist.log_prob(actions)
+            action_log_probs = action_log_probs_raw.sum(1)
 
             actions = actions.view(-1, self.num_actions)
 
@@ -129,7 +134,7 @@ class BaseTrainer:
             pass
             dist = Categorical(logits=logits)
             action_log_probs = dist.log_prob(act.view(-1)).view(-1, 1)
-            dist_entropy = dist.entropy()
+            dist_entropy = dist.entropy().mean()
         else:
             assert torch.is_floating_point(act)
             means, log_std, values = self.model(obs)
@@ -138,7 +143,7 @@ class BaseTrainer:
             dist = torch.distributions.Normal(means, action_std)
             action_log_probs_raw = dist.log_prob(act)
             action_log_probs = action_log_probs_raw.sum(axis=-1)
-            dist_entropy = dist.entropy().sum(-1)
+            dist_entropy = dist.entropy().mean()
 
         values = values.view(-1, 1)
         action_log_probs = action_log_probs.view(-1, 1)

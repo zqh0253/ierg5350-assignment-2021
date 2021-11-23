@@ -93,14 +93,14 @@ class PPOTrainer(BaseTrainer):
         assert dist_entropy.requires_grad
 
         # [TODO] Implement policy loss
-        policy_loss = None
-        ratio = None  # The importance sampling factor, the ratio of new policy prob over old policy prob
-        pass
 
+        ratio = torch.exp(action_log_probs - old_action_log_probs_batch)  # The importance sampling factor, the ratio of new policy prob over old policy prob
+        surr1 = ratio * adv_targ
+        surr2 = torch.clamp(ratio, 1-self.clip_param, 1+self.clip_param) * adv_targ
+        policy_loss_mean = policy_loss = -torch.min(surr1, surr2).mean()
 
         # [TODO] Implement value loss
-        value_loss = None
-        pass
+        value_loss_mean = value_loss = 0.5 * (return_batch - values).pow(2).mean()
 
         # This is the total loss
         loss = policy_loss + self.config.value_loss_weight * value_loss - self.config.entropy_loss_weight * dist_entropy

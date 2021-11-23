@@ -12,6 +12,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from collections import deque
+from core.utils import verify_log_dir, pretty_print, Timer, summary, save_progress, step_envs
 
 current_dir = osp.join(osp.abspath(osp.dirname(__file__)))
 sys.path.append(current_dir)
@@ -144,7 +146,7 @@ class TD3Trainer:
         state = torch.FloatTensor(state.reshape(1, -1)).to(device)
         return self.actor(state).cpu().data.numpy().flatten()
 
-    def train(self, replay_buffer, batch_size=256):
+    def train(self, replay_buffer, batch_size=512):
         self.total_it += 1
 
         # Sample replay buffer
@@ -153,8 +155,14 @@ class TD3Trainer:
         # [TODO] Following the TODOs below to implement critic loss
         with torch.no_grad():
             # Compute the target Q value
-            target_Q = None
-            pass
+            noise = (torch.randn_like(action) * self.policy_noise).clamp(-self.noise_clip, self.noise_clip)
+            next_action = (self.actor_target(next_state) + noise).clamp(-self.max_action, self.max_action)
+            try:
+                q1, q2 = self.critic_target(next_state, next_action)
+                target_Q = torch.min(q1, q2)
+            except:
+                print(1)
+            target_Q = reward + not_done * self.discount * target_Q
 
         # Get current Q estimates
         current_Q1, current_Q2 = self.critic(state, action)
@@ -171,8 +179,7 @@ class TD3Trainer:
         if self.total_it % self.policy_freq == 0:
 
             # [TODO] Compute actor loss
-            actor_loss = None
-            pass
+            actor_loss = -self.critic.Q1(state, self.actor(state)).mean()
 
             # Optimize the actor
             self.actor_optimizer.zero_grad()
@@ -285,7 +292,7 @@ if __name__ == "__main__":
         "discount": args.discount,
         "tau": args.tau,
     }
-
+    progress = []
     # Target policy smoothing is scaled wrt the action scale
     kwargs["policy_noise"] = args.policy_noise * max_action
     kwargs["noise_clip"] = args.noise_clip * max_action
@@ -301,6 +308,7 @@ if __name__ == "__main__":
     episode_reward = 0
     episode_timesteps = 0
     episode_num = 0
+    success_recorder = deque(maxlen=100)
 
     for t in range(int(args.max_timesteps)):
 
@@ -316,7 +324,7 @@ if __name__ == "__main__":
             ).clip(-max_action, max_action)
 
         # Perform action
-        next_state, reward, done, _ = env.step(action)
+        next_state, reward, done, info = env.step(action)
         done_bool = float(done)  # if episode_timesteps < env._max_episode_steps else 0
 
         if args.load_model:
@@ -333,11 +341,16 @@ if __name__ == "__main__":
         if t >= args.start_timesteps:
             policy.train(replay_buffer, args.batch_size)
 
+
         if done:
+            progress.append(
+                {'total_steps': t, 'reward': episode_reward, 'success_rate': sum(success_recorder)})
+
             # +1 to account for 0 indexing. +0 on ep_timesteps since it will increment +1 even if done=True
             print(
-                f"Total T: {t + 1} Episode Num: {episode_num + 1} Episode T: {episode_timesteps} Reward: {episode_reward:.3f}")
+                f"Total T: {t + 1} Episode Num: {episode_num + 1} Episode T: {episode_timesteps} Reward: {episode_reward:.3f} Suc: {sum(success_recorder):.3f}")
             # Reset environment
+            success_recorder.append(info['arrive_dest'])
             state, done = env.reset(), False
             episode_reward = 0
             episode_timesteps = 0
@@ -345,3 +358,5 @@ if __name__ == "__main__":
 
         if (t + 1) % args.save_freq == 0:
             policy.save(f"{log_dir}/models/default")
+
+    save_progress(log_dir, progress)
